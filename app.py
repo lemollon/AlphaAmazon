@@ -13,7 +13,7 @@ from io import BytesIO
 app = Flask(__name__)
 
 # Get API key from environment variable (set in Render)
-KEEPA_API_KEY = os.environ.get('KEEPA_API_KEY', '')
+KEEPA_API_KEY = os.environ.get('s0l63d3uc5sl2oghiqseth9028bd52uc1t6nfge939micgheek7op4fmued1lphl', '')
 
 # Initialize Keepa API
 api = None
