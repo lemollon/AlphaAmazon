@@ -1,588 +1,299 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Game Arbitrage Tracker</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+"""
+Game Arbitrage Tracker - Flask Backend
+Full version with all features - Line count: ~250 lines
+"""
 
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
+from flask import Flask, render_template, request, jsonify, send_file
+import keepa
+import os
+from datetime import datetime
+import pandas as pd
+from io import BytesIO
 
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-            overflow: hidden;
-        }
+app = Flask(__name__)
 
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
-            text-align: center;
-        }
+# API key from environment variable (set in Render, NOT in code)
+KEEPA_API_KEY = os.environ.get('KEEPA_API_KEY', '')
 
-        .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
+if not KEEPA_API_KEY:
+    print("WARNING: KEEPA_API_KEY environment variable not set!")
 
-        .header p {
-            font-size: 1.1em;
-            opacity: 0.9;
-        }
+# Initialize Keepa API
+api = None
+if KEEPA_API_KEY:
+    try:
+        api = keepa.Keepa(KEEPA_API_KEY)
+        print("✓ Keepa API initialized successfully")
+    except Exception as e:
+        print(f"✗ Error initializing Keepa API: {e}")
 
-        .content {
-            padding: 30px;
-        }
+@app.route('/')
+def index():
+    """Serve the main page"""
+    return render_template('index.html')
 
-        .input-section {
-            background: #f8f9fa;
-            padding: 25px;
-            border-radius: 8px;
-            margin-bottom: 30px;
-        }
-
-        .input-section h2 {
-            color: #333;
-            margin-bottom: 15px;
-            font-size: 1.4em;
-        }
-
-        .input-section p {
-            color: #666;
-            margin-bottom: 15px;
-        }
-
-        textarea {
-            width: 100%;
-            height: 150px;
-            padding: 15px;
-            border: 2px solid #ddd;
-            border-radius: 6px;
-            font-size: 14px;
-            font-family: 'Courier New', monospace;
-            resize: vertical;
-        }
-
-        textarea:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-
-        .btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 15px 40px;
-            font-size: 16px;
-            font-weight: bold;
-            border-radius: 6px;
-            cursor: pointer;
-            margin-top: 15px;
-        }
-
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-        }
-
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        .btn-secondary {
-            background: #28a745;
-            margin-left: 10px;
-        }
-
-        .progress-section {
-            background: #fff3cd;
-            border: 2px solid #ffc107;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 30px;
-            display: none;
-        }
-
-        .progress-section.active {
-            display: block;
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 30px;
-            background: #e9ecef;
-            border-radius: 15px;
-            overflow: hidden;
-            margin-top: 10px;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #28a745, #20c997);
-            transition: width 0.3s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-
-        .stat-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 8px;
-            text-align: center;
-        }
-
-        .stat-card h3 {
-            font-size: 2em;
-            margin-bottom: 5px;
-        }
-
-        .results-section {
-            display: none;
-        }
-
-        .results-section.active {
-            display: block;
-        }
-
-        .results-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-
-        .table-wrapper {
-            overflow-x: auto;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            max-height: 600px;
-            overflow-y: auto;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 14px;
-        }
-
-        thead {
-            background: #f8f9fa;
-            position: sticky;
-            top: 0;
-        }
-
-        th {
-            padding: 15px 10px;
-            text-align: left;
-            font-weight: 600;
-            color: #495057;
-            border-bottom: 2px solid #dee2e6;
-            white-space: nowrap;
-        }
-
-        td {
-            padding: 12px 10px;
-            border-bottom: 1px solid #dee2e6;
-        }
-
-        tr:hover {
-            background: #f8f9fa;
-        }
-
-        .profit-positive {
-            color: #28a745;
-            font-weight: bold;
-        }
-
-        .profit-negative {
-            color: #dc3545;
-            font-weight: bold;
-        }
-
-        .velocity-badge {
-            display: inline-block;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: bold;
-            text-transform: uppercase;
-        }
-
-        .velocity-lightning { background: #dc3545; color: white; }
-        .velocity-fast { background: #fd7e14; color: white; }
-        .velocity-moderate { background: #ffc107; color: #333; }
-        .velocity-slow { background: #6c757d; color: white; }
-
-        .rank-info {
-            font-size: 11px;
-            color: #666;
-            display: block;
-            margin-top: 3px;
-        }
-
-        .tag {
-            display: inline-block;
-            padding: 3px 8px;
-            border-radius: 3px;
-            font-size: 11px;
-            margin-right: 4px;
-        }
-
-        .tag-oos { background: #dc3545; color: white; }
-        .tag-opportunity { background: #28a745; color: white; }
-        .tag-trending { background: #17a2b8; color: white; }
-
-        .error-section {
-            background: #f8d7da;
-            border: 1px solid #f5c6cb;
-            border-radius: 8px;
-            padding: 15px;
-            margin-top: 20px;
-            display: none;
-        }
-
-        .error-section.active {
-            display: block;
-        }
-
-        .error-section h3 {
-            color: #721c24;
-            margin-bottom: 10px;
-        }
-
-        .error-list {
-            max-height: 200px;
-            overflow-y: auto;
-        }
-
-        .error-item {
-            padding: 5px;
-            font-size: 13px;
-            color: #721c24;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🎮 Game Arbitrage Tracker</h1>
-            <p>Find profitable video game arbitrage opportunities with real-time Amazon data</p>
-        </div>
-
-        <div class="content">
-            <!-- Input Section -->
-            <div class="input-section">
-                <h2>📋 Paste Your UPCs/SKUs</h2>
-                <p>Enter one UPC per line (up to 2000). Example: 045496590482</p>
-                <textarea id="upcInput" placeholder="045496590482
-093155141698
-085392246724
-...paste all your UPCs here..."></textarea>
-                <button class="btn" id="fetchBtn" onclick="startFetch()">🚀 Fetch Prices & Arbitrage Data</button>
-            </div>
-
-            <!-- Progress Section -->
-            <div class="progress-section" id="progressSection">
-                <h3>⏳ Processing your games...</h3>
-                <p id="progressText">Fetching data from Keepa API...</p>
-                <div class="progress-bar">
-                    <div class="progress-fill" id="progressFill" style="width: 0%">0%</div>
-                </div>
-            </div>
-
-            <!-- Stats Section -->
-            <div class="results-section" id="statsSection">
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <h3 id="totalGames">0</h3>
-                        <p>Total Games</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3 id="profitableCount">0</h3>
-                        <p>Profitable Opportunities</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3 id="avgProfit">$0</h3>
-                        <p>Avg Profit Potential</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3 id="hotItems">0</h3>
-                        <p>Lightning Fast (Rank < 1k)</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Results Table -->
-            <div class="results-section" id="resultsSection">
-                <div class="results-header">
-                    <h2>📊 Analysis Results</h2>
-                    <button class="btn btn-secondary" onclick="downloadExcel()">📥 Download Excel File</button>
-                </div>
-
-                <div class="table-wrapper">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Title</th>
-                                <th>UPC</th>
-                                <th>Current Price</th>
-                                <th>30-Day Avg</th>
-                                <th>90-Day Range</th>
-                                <th>Sales Velocity</th>
-                                <th>Competition</th>
-                                <th>Est. Profit</th>
-                                <th>Opportunities</th>
-                            </tr>
-                        </thead>
-                        <tbody id="resultsBody">
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Error Section -->
-            <div class="error-section" id="errorSection">
-                <h3>⚠️ Errors (<span id="errorCount">0</span> UPCs not found)</h3>
-                <div class="error-list" id="errorList"></div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        let currentResults = [];
-
-        function startFetch() {
-            const input = document.getElementById('upcInput').value.trim();
-            if (!input) {
-                alert('Please paste some UPCs first!');
-                return;
-            }
-
-            const upcs = input.split('\n').filter(u => u.trim()).map(u => u.trim());
+@app.route('/api/process', methods=['POST'])
+def process_upcs():
+    """
+    Main processing endpoint - fetches data from Keepa for all UPCs
+    Handles up to 2000 games in batches of 100
+    Returns: JSON with game data + errors
+    """
+    
+    if not api:
+        return jsonify({'error': 'Keepa API not configured'}), 500
+    
+    data = request.json
+    upcs = data.get('upcs', [])
+    
+    if not upcs:
+        return jsonify({'error': 'No UPCs provided'}), 400
+    
+    if len(upcs) > 2000:
+        return jsonify({'error': 'Maximum 2000 UPCs allowed'}), 400
+    
+    results = []
+    errors = []
+    
+    # Process in batches to respect API limits
+    batch_size = 100
+    for i in range(0, len(upcs), batch_size):
+        batch = upcs[i:i+batch_size]
+        
+        try:
+            # Query Keepa API with full history and offer data
+            products = api.query(
+                batch,
+                product_code_is_asin=False,  # Using UPC, not ASIN
+                history=True,                 # Get price history
+                stats=90,                     # 90 days of statistics
+                offers=20                     # Get marketplace offers
+            )
             
-            if (upcs.length === 0) {
-                alert('No valid UPCs found!');
-                return;
-            }
-
-            // Disable button and show progress
-            document.getElementById('fetchBtn').disabled = true;
-            document.getElementById('progressSection').classList.add('active');
-            document.getElementById('progressText').textContent = `Processing ${upcs.length} games...`;
-            
-            // Call API
-            fetch('/api/process', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ upcs: upcs })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    alert('Error: ' + data.error);
-                    return;
-                }
-
-                currentResults = data.results;
-                displayResults(data.results);
-                displayErrors(data.errors);
+            # Process each product in the batch
+            for idx, product in enumerate(products):
+                if not product:
+                    errors.append({
+                        'upc': batch[idx],
+                        'error': 'Product not found'
+                    })
+                    continue
                 
-                // Hide progress
-                document.getElementById('progressSection').classList.remove('active');
-                document.getElementById('fetchBtn').disabled = false;
-            })
-            .catch(error => {
-                alert('Error processing UPCs: ' + error);
-                document.getElementById('progressSection').classList.remove('active');
-                document.getElementById('fetchBtn').disabled = false;
-            });
-        }
+                try:
+                    # ========================================
+                    # EXTRACT PRICE DATA
+                    # ========================================
+                    current_price = None
+                    price_history = []
+                    
+                    if 'data' in product and 'NEW' in product['data']:
+                        prices = product['data']['NEW']
+                        if prices and len(prices) > 0:
+                            # Keepa stores prices in cents, convert to dollars
+                            current_price = prices[-1] / 100
+                            price_history = [p/100 for p in prices if p is not None and p > 0]
+                    
+                    # ========================================
+                    # CALCULATE PRICE STATISTICS
+                    # ========================================
+                    low_90 = min(price_history) if price_history else None
+                    high_90 = max(price_history) if price_history else None
+                    
+                    # 30-day average
+                    if len(price_history) >= 30:
+                        avg_30 = sum(price_history[-30:]) / len(price_history[-30:])
+                    else:
+                        avg_30 = current_price
+                    
+                    # ========================================
+                    # SALES RANK & VELOCITY
+                    # ========================================
+                    sales_rank = product.get('salesRank', 999999)
+                    if isinstance(sales_rank, list) and len(sales_rank) > 0:
+                        sales_rank = sales_rank[-1] if sales_rank[-1] > 0 else 999999
+                    
+                    # Estimate monthly sales based on rank
+                    # Lower rank = faster moving
+                    if sales_rank < 1000:
+                        est_sales = 1500  # ~50 per day
+                    elif sales_rank < 5000:
+                        est_sales = 800   # ~27 per day
+                    elif sales_rank < 20000:
+                        est_sales = 300   # ~10 per day
+                    elif sales_rank < 50000:
+                        est_sales = 100   # ~3 per day
+                    elif sales_rank < 100000:
+                        est_sales = 30    # Few per week
+                    else:
+                        est_sales = 10    # Very slow
+                    
+                    # ========================================
+                    # COMPETITION ANALYSIS
+                    # ========================================
+                    seller_count = 0
+                    if 'offers' in product and product['offers']:
+                        seller_count = len(product['offers'])
+                    
+                    # Check if Amazon is out of stock
+                    amazon_oos = False
+                    if 'data' in product and 'AMAZON' in product['data']:
+                        amazon_prices = product['data']['AMAZON']
+                        # -1 or empty means out of stock
+                        amazon_oos = not amazon_prices or amazon_prices[-1] == -1
+                    
+                    # ========================================
+                    # PRICE TREND ANALYSIS
+                    # ========================================
+                    trend = 'stable'
+                    if len(price_history) >= 10:
+                        recent_avg = sum(price_history[-5:]) / 5
+                        older_avg = sum(price_history[-10:-5]) / 5
+                        
+                        if recent_avg > older_avg * 1.05:
+                            trend = 'rising'
+                        elif recent_avg < older_avg * 0.95:
+                            trend = 'falling'
+                    
+                    # ========================================
+                    # PROFIT CALCULATION
+                    # ========================================
+                    # Assumes: $30 buy cost (adjustable)
+                    # Fees: 15% Amazon referral + $3.99 FBA + $2 shipping
+                    if current_price:
+                        buy_cost = 30
+                        amazon_fee = current_price * 0.15  # 15% referral
+                        fba_fee = 3.99                      # FBA fulfillment
+                        shipping = 2.00                     # Shipping to Amazon
+                        profit = current_price - buy_cost - amazon_fee - fba_fee - shipping
+                    else:
+                        profit = None
+                    
+                    # ========================================
+                    # BUILD RESULT OBJECT
+                    # ========================================
+                    result = {
+                        'upc': batch[idx],
+                        'title': product.get('title', 'Unknown'),
+                        'asin': product.get('asin', ''),
+                        'current_price': current_price,
+                        'avg_30': avg_30,
+                        'low_90': low_90,
+                        'high_90': high_90,
+                        'sales_rank': sales_rank,
+                        'est_sales_month': est_sales,
+                        'seller_count': seller_count,
+                        'amazon_oos': amazon_oos,
+                        'trend': trend,
+                        'profit': profit,
+                        # Keep last 12 price points for charting
+                        'price_history': price_history[-12:] if len(price_history) > 12 else price_history
+                    }
+                    
+                    results.append(result)
+                    
+                except Exception as e:
+                    errors.append({
+                        'upc': batch[idx],
+                        'error': str(e)
+                    })
+                    
+        except Exception as e:
+            # Entire batch failed
+            for upc in batch:
+                errors.append({
+                    'upc': upc,
+                    'error': f'Batch error: {str(e)}'
+                })
+    
+    # Return all results
+    return jsonify({
+        'results': results,
+        'errors': errors,
+        'total_processed': len(results),
+        'total_errors': len(errors)
+    })
 
-        function displayResults(results) {
-            if (results.length === 0) {
-                alert('No results found!');
-                return;
-            }
+@app.route('/api/download', methods=['POST'])
+def download_excel():
+    """
+    Generate Excel file with game data
+    Creates multiple sheets: Game Data + Price History
+    Returns: Excel file download
+    """
+    
+    data = request.json
+    results = data.get('results', [])
+    
+    if not results:
+        return jsonify({'error': 'No data to export'}), 400
+    
+    # Create Excel file in memory (not saved to disk)
+    output = BytesIO()
+    
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # ========================================
+        # SHEET 1: MAIN GAME DATA
+        # ========================================
+        df = pd.DataFrame(results)
+        
+        # Reorder columns for better readability
+        columns = ['title', 'upc', 'asin', 'current_price', 'avg_30', 'low_90', 'high_90', 
+                   'sales_rank', 'est_sales_month', 'seller_count', 'profit', 'amazon_oos', 'trend']
+        df = df[[col for col in columns if col in df.columns]]
+        
+        # Rename columns to be user-friendly
+        df.columns = ['Title', 'UPC', 'ASIN', 'Current Price', '30-Day Avg', '90-Day Low', 
+                      '90-Day High', 'Sales Rank', 'Est Sales/Month', 'Sellers', 
+                      'Profit (@$30 cost)', 'Amazon OOS', 'Trend']
+        
+        df.to_excel(writer, sheet_name='Game Data', index=False)
+        
+        # ========================================
+        # SHEET 2: PRICE HISTORY
+        # ========================================
+        history_data = []
+        for item in results:
+            if 'price_history' in item and item['price_history']:
+                for idx, price in enumerate(item['price_history']):
+                    history_data.append({
+                        'UPC': item['upc'],
+                        'Title': item['title'],
+                        'Price': price,
+                        'Period': idx + 1
+                    })
+        
+        if history_data:
+            history_df = pd.DataFrame(history_data)
+            history_df.to_excel(writer, sheet_name='Price History', index=False)
+    
+    # Reset stream position to beginning
+    output.seek(0)
+    
+    # Send file to user
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=f'game_arbitrage_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+    )
 
-            // Update stats
-            document.getElementById('totalGames').textContent = results.length;
-            const profitable = results.filter(r => r.profit && r.profit > 0).length;
-            document.getElementById('profitableCount').textContent = profitable;
-            
-            const avgProfit = results.reduce((sum, r) => sum + (r.profit || 0), 0) / results.length;
-            document.getElementById('avgProfit').textContent = '$' + avgProfit.toFixed(2);
-            
-            const hot = results.filter(r => r.sales_rank < 1000).length;
-            document.getElementById('hotItems').textContent = hot;
+@app.route('/health')
+def health():
+    """
+    Health check endpoint for monitoring
+    Returns: API status
+    """
+    return jsonify({
+        'status': 'healthy',
+        'api_configured': api is not None,
+        'api_key_set': bool(KEEPA_API_KEY)
+    })
 
-            // Show sections
-            document.getElementById('statsSection').classList.add('active');
-            document.getElementById('resultsSection').classList.add('active');
-
-            // Populate table
-            const tbody = document.getElementById('resultsBody');
-            tbody.innerHTML = '';
-            
-            results.forEach(game => {
-                const velocity = getVelocityInfo(game.sales_rank, game.est_sales_month);
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td><strong>${game.title}</strong></td>
-                    <td>${game.upc}</td>
-                    <td><strong>$${game.current_price ? game.current_price.toFixed(2) : 'N/A'}</strong></td>
-                    <td>$${game.avg_30 ? game.avg_30.toFixed(2) : 'N/A'}</td>
-                    <td>$${game.low_90 ? game.low_90.toFixed(2) : 'N/A'} - $${game.high_90 ? game.high_90.toFixed(2) : 'N/A'}</td>
-                    <td>
-                        <span class="velocity-badge ${velocity.badge}">${velocity.label}</span>
-                        <span class="rank-info">${velocity.description}</span>
-                        <span class="rank-info">Rank: #${game.sales_rank.toLocaleString()}</span>
-                    </td>
-                    <td>${game.seller_count} sellers</td>
-                    <td class="${game.profit && game.profit > 0 ? 'profit-positive' : 'profit-negative'}">
-                        ${game.profit ? (game.profit > 0 ? '+' : '') + '$' + game.profit.toFixed(2) : 'N/A'}
-                        <span class="rank-info">@ $30 buy cost</span>
-                    </td>
-                    <td>${getOpportunityTags(game)}</td>
-                `;
-                tbody.appendChild(row);
-            });
-        }
-
-        function displayErrors(errors) {
-            if (!errors || errors.length === 0) {
-                return;
-            }
-
-            document.getElementById('errorSection').classList.add('active');
-            document.getElementById('errorCount').textContent = errors.length;
-            
-            const errorList = document.getElementById('errorList');
-            errorList.innerHTML = '';
-            
-            errors.forEach(err => {
-                const div = document.createElement('div');
-                div.className = 'error-item';
-                div.textContent = `${err.upc}: ${err.error}`;
-                errorList.appendChild(div);
-            });
-        }
-
-        function getVelocityInfo(rank, salesPerMonth) {
-            if (rank < 1000) {
-                return {
-                    badge: 'velocity-lightning',
-                    label: '⚡ LIGHTNING',
-                    description: `Sells ${Math.round(salesPerMonth/30)} times PER DAY`
-                };
-            } else if (rank < 5000) {
-                return {
-                    badge: 'velocity-fast',
-                    label: '🔥 VERY FAST',
-                    description: `Sells ${Math.round(salesPerMonth/30)} times PER DAY`
-                };
-            } else if (rank < 20000) {
-                return {
-                    badge: 'velocity-fast',
-                    label: '📈 FAST',
-                    description: `Sells ${Math.round(salesPerMonth/4)} times PER WEEK`
-                };
-            } else if (rank < 50000) {
-                return {
-                    badge: 'velocity-moderate',
-                    label: '🐢 MODERATE',
-                    description: `Sells weekly`
-                };
-            } else {
-                return {
-                    badge: 'velocity-slow',
-                    label: '❄️ SLOW',
-                    description: 'Takes weeks/months'
-                };
-            }
-        }
-
-        function getOpportunityTags(game) {
-            let tags = '';
-            
-            if (game.amazon_oos) {
-                tags += '<span class="tag tag-oos">🔥 Amazon OOS</span>';
-            }
-            
-            if (game.current_price && game.avg_30 && game.current_price < game.avg_30 * 0.9) {
-                tags += '<span class="tag tag-opportunity">💰 Below Avg</span>';
-            }
-            
-            if (game.sales_rank < 5000 && game.seller_count < 5) {
-                tags += '<span class="tag tag-opportunity">⚡ HOT ITEM</span>';
-            }
-            
-            if (game.trend === 'rising') {
-                tags += '<span class="tag tag-trending">📈 Rising</span>';
-            }
-            
-            if (game.profit && game.profit > 10) {
-                tags += '<span class="tag tag-opportunity">💵 High Profit</span>';
-            }
-            
-            return tags || '—';
-        }
-
-        function downloadExcel() {
-            if (currentResults.length === 0) {
-                alert('No data to download!');
-                return;
-            }
-
-            fetch('/api/download', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ results: currentResults })
-            })
-            .then(response => response.blob())
-            .then(blob => {
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `game_arbitrage_${new Date().toISOString().split('T')[0]}.xlsx`;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-            })
-            .catch(error => {
-                alert('Error downloading Excel: ' + error);
-            });
-        }
-    </script>
-</body>
-</html>
+# ========================================
+# RUN THE APP
+# ========================================
+if __name__ == '__main__':
+    # Get port from environment (Render sets this)
+    port = int(os.environ.get('PORT', 5000))
+    # Run on all interfaces so Render can access it
+    app.run(host='0.0.0.0', port=port)
