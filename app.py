@@ -10,11 +10,24 @@ import pandas as pd
 from datetime import datetime
 import io
 import os
+import numpy as np
 
 app = Flask(__name__)
 
 # Get Keepa API key from environment variable (set in Render dashboard)
 KEEPA_API_KEY = os.environ.get('KEEPA_API_KEY', 'YOUR_KEEPA_API_KEY_HERE')
+
+def convert_to_native_types(obj):
+    """Convert numpy types to native Python types for JSON serialization"""
+    if isinstance(obj, (np.integer, np.int64, np.int32)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float64, np.float32)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, (np.bool_, bool)):
+        return bool(obj)
+    return obj
 
 @app.route('/')
 def index():
@@ -290,36 +303,36 @@ def process_upcs():
                     risk_recommendation = '🔴 Avoid or minimize investment'
                 
                 result = {
-                    'upc': upc,
-                    'title': product.get('title', 'Unknown'),
-                    'asin': product.get('asin', ''),
+                    'upc': str(upc),
+                    'title': str(product.get('title', 'Unknown')),
+                    'asin': str(product.get('asin', '')),
                     'keepa_link': f"https://keepa.com/#!product/1-{product.get('asin', '')}" if product.get('asin') else '',
                     'amazon_link': f"https://www.amazon.com/dp/{product.get('asin', '')}" if product.get('asin') else '',
-                    'current_price': current_price,
-                    'avg_30': avg_30,
-                    'low_90': low_90,
-                    'high_90': high_90,
-                    'sales_rank': sales_rank,
-                    'est_sales_month': est_sales,
-                    'est_sales_per_day': est_sales_per_day,
-                    'velocity_category': velocity_category,
-                    'velocity_explanation': velocity_explanation,
-                    'seller_count': seller_count,
-                    'profit': profit,
-                    'roi_percent': roi_percent,
-                    'break_even_price': break_even_price,
-                    'price_vs_avg_percent': price_vs_avg_percent,
-                    'price_vs_avg_signal': price_vs_avg_signal,
-                    'price_vs_avg_text': price_vs_avg_text,
-                    'competition_level': competition_level,
-                    'competition_warning': competition_warning,
-                    'risk_score': risk_score,
-                    'risk_level': risk_level,
-                    'risk_color': risk_color,
-                    'risk_recommendation': risk_recommendation,
-                    'risk_factors': risk_factors,
-                    'amazon_oos': amazon_oos,
-                    'trend': trend,
+                    'current_price': convert_to_native_types(current_price) if current_price is not None else None,
+                    'avg_30': convert_to_native_types(avg_30) if avg_30 is not None else None,
+                    'low_90': convert_to_native_types(low_90) if low_90 is not None else None,
+                    'high_90': convert_to_native_types(high_90) if high_90 is not None else None,
+                    'sales_rank': convert_to_native_types(sales_rank),
+                    'est_sales_month': convert_to_native_types(est_sales),
+                    'est_sales_per_day': convert_to_native_types(est_sales_per_day),
+                    'velocity_category': str(velocity_category),
+                    'velocity_explanation': str(velocity_explanation),
+                    'seller_count': convert_to_native_types(seller_count),
+                    'profit': convert_to_native_types(profit) if profit is not None else None,
+                    'roi_percent': convert_to_native_types(roi_percent) if roi_percent is not None else None,
+                    'break_even_price': convert_to_native_types(break_even_price) if break_even_price is not None else None,
+                    'price_vs_avg_percent': convert_to_native_types(price_vs_avg_percent) if price_vs_avg_percent is not None else None,
+                    'price_vs_avg_signal': str(price_vs_avg_signal),
+                    'price_vs_avg_text': str(price_vs_avg_text),
+                    'competition_level': str(competition_level),
+                    'competition_warning': str(competition_warning),
+                    'risk_score': convert_to_native_types(risk_score),
+                    'risk_level': str(risk_level),
+                    'risk_color': str(risk_color),
+                    'risk_recommendation': str(risk_recommendation),
+                    'risk_factors': [str(f) for f in risk_factors],
+                    'amazon_oos': bool(amazon_oos),
+                    'trend': str(trend),
                     'processed_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 }
                 
@@ -361,19 +374,21 @@ def download_excel():
         
         # Reorder columns for better readability
         column_order = [
-            'title', 'upc', 'asin', 'current_price', 'avg_30', 
-            'low_90', 'high_90', 'sales_rank', 'est_sales_month',
-            'seller_count', 'profit', 'roi_percent', 'break_even_price',
-            'risk_score', 'risk_level', 'amazon_oos', 'trend', 'processed_date'
+            'title', 'upc', 'asin', 'keepa_link', 'amazon_link', 
+            'current_price', 'avg_30', 'low_90', 'high_90', 'sales_rank', 
+            'est_sales_month', 'seller_count', 'profit', 'roi_percent', 
+            'break_even_price', 'risk_score', 'risk_level', 'amazon_oos', 
+            'trend', 'processed_date'
         ]
         df = df[[col for col in column_order if col in df.columns]]
         
         # Rename columns for Excel
         df.columns = [
-            'Title', 'UPC', 'ASIN', 'Current Price', '30-Day Avg',
-            '90-Day Low', '90-Day High', 'Sales Rank', 'Est Sales/Month',
-            'Sellers', 'Profit (@$30 cost)', 'ROI %', 'Break-Even Price',
-            'Risk Score', 'Risk Level', 'Amazon OOS', 'Trend', 'Processed Date'
+            'Title', 'UPC', 'ASIN', 'Keepa Link', 'Amazon Link',
+            'Current Price', '30-Day Avg', '90-Day Low', '90-Day High', 
+            'Sales Rank', 'Est Sales/Month', 'Sellers', 'Profit (@$30 cost)', 
+            'ROI %', 'Break-Even Price', 'Risk Score', 'Risk Level', 
+            'Amazon OOS', 'Trend', 'Processed Date'
         ]
         
         # Create Excel file in memory
