@@ -143,10 +143,10 @@ def process_upcs():
                 amazon_oos = False
                 if 'data' in product and 'AMAZON' in product['data']:
                     amazon_prices = product['data']['AMAZON']
-                    if amazon_prices is not None and hasattr(amazon_prices, '__len__') and len(amazon_prices) > 0:
-                        amazon_price_values = [amazon_prices[i] for i in range(1, len(amazon_prices), 2)]
-                        last_amazon_price = amazon_price_values[-1] if amazon_price_values else -1
-                        amazon_oos = last_amazon_price == -1 or last_amazon_price is None
+                    if amazon_prices is not None and len(amazon_prices) > 0:
+                        # Filter valid prices (not None, not -0.01)
+                        valid_amazon_prices = [p for p in amazon_prices if p is not None and p > 0]
+                        amazon_oos = len(valid_amazon_prices) == 0 or valid_amazon_prices[-1] <= 0
                     else:
                         amazon_oos = True
                 else:
@@ -293,6 +293,8 @@ def process_upcs():
                     'upc': upc,
                     'title': product.get('title', 'Unknown'),
                     'asin': product.get('asin', ''),
+                    'keepa_link': f"https://keepa.com/#!product/1-{product.get('asin', '')}" if product.get('asin') else '',
+                    'amazon_link': f"https://www.amazon.com/dp/{product.get('asin', '')}" if product.get('asin') else '',
                     'current_price': current_price,
                     'avg_30': avg_30,
                     'low_90': low_90,
