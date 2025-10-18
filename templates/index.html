@@ -92,6 +92,7 @@
             border-radius: 6px;
             cursor: pointer;
             margin-top: 15px;
+            transition: all 0.3s;
         }
 
         .btn:hover {
@@ -209,6 +210,7 @@
         td {
             padding: 12px 10px;
             border-bottom: 1px solid #dee2e6;
+            vertical-align: top;
         }
 
         tr:hover {
@@ -252,6 +254,7 @@
             border-radius: 3px;
             font-size: 11px;
             margin-right: 4px;
+            margin-top: 4px;
         }
 
         .tag-oos { background: #dc3545; color: white; }
@@ -286,6 +289,15 @@
             font-size: 13px;
             color: #721c24;
         }
+
+        .info-badge {
+            margin-top: 5px;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            display: inline-block;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -296,7 +308,6 @@
         </div>
 
         <div class="content">
-            <!-- Input Section -->
             <div class="input-section">
                 <h2>📋 Paste Your UPCs/SKUs</h2>
                 <p>Enter one UPC per line (up to 2000). Example: 045496590482</p>
@@ -307,7 +318,6 @@
                 <button class="btn" id="fetchBtn" onclick="startFetch()">🚀 Fetch Prices & Arbitrage Data</button>
             </div>
 
-            <!-- Progress Section -->
             <div class="progress-section" id="progressSection">
                 <h3>⏳ Processing your games...</h3>
                 <p id="progressText">Fetching data from Keepa API...</p>
@@ -316,7 +326,6 @@
                 </div>
             </div>
 
-            <!-- Stats Section -->
             <div class="results-section" id="statsSection">
                 <div class="stats-grid">
                     <div class="stat-card">
@@ -338,7 +347,6 @@
                 </div>
             </div>
 
-            <!-- Results Table -->
             <div class="results-section" id="resultsSection">
                 <div class="results-header">
                     <h2>📊 Analysis Results</h2>
@@ -349,14 +357,14 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>Title</th>
+                                <th>Title & Analysis</th>
                                 <th>UPC</th>
-                                <th>Current Price</th>
+                                <th>Price Info</th>
                                 <th>30-Day Avg</th>
                                 <th>90-Day Range</th>
                                 <th>Sales Velocity</th>
                                 <th>Competition</th>
-                                <th>Est. Profit</th>
+                                <th>Profit Analysis</th>
                                 <th>Opportunities</th>
                             </tr>
                         </thead>
@@ -366,7 +374,6 @@
                 </div>
             </div>
 
-            <!-- Error Section -->
             <div class="error-section" id="errorSection">
                 <h3>⚠️ Errors (<span id="errorCount">0</span> UPCs not found)</h3>
                 <div class="error-list" id="errorList"></div>
@@ -391,12 +398,10 @@
                 return;
             }
 
-            // Disable button and show progress
             document.getElementById('fetchBtn').disabled = true;
             document.getElementById('progressSection').classList.add('active');
             document.getElementById('progressText').textContent = `Processing ${upcs.length} games...`;
             
-            // Call API
             fetch('/api/process', {
                 method: 'POST',
                 headers: {
@@ -415,7 +420,6 @@
                 displayResults(data.results);
                 displayErrors(data.errors);
                 
-                // Hide progress
                 document.getElementById('progressSection').classList.remove('active');
                 document.getElementById('fetchBtn').disabled = false;
             })
@@ -432,7 +436,6 @@
                 return;
             }
 
-            // Update stats
             document.getElementById('totalGames').textContent = results.length;
             const profitable = results.filter(r => r.profit && r.profit > 0).length;
             document.getElementById('profitableCount').textContent = profitable;
@@ -443,37 +446,146 @@
             const hot = results.filter(r => r.sales_rank < 1000).length;
             document.getElementById('hotItems').textContent = hot;
 
-            // Show sections
             document.getElementById('statsSection').classList.add('active');
             document.getElementById('resultsSection').classList.add('active');
 
-            // Populate table
             const tbody = document.getElementById('resultsBody');
             tbody.innerHTML = '';
             
             results.forEach(game => {
-                const velocity = getVelocityInfo(game.sales_rank, game.est_sales_month);
                 const row = document.createElement('tr');
                 row.innerHTML = `
-                    <td><strong>${game.title}</strong></td>
+                    <td>
+                        <strong>${game.title}</strong>
+                        ${getPriceVsAvgBadge(game)}
+                        ${getRiskBadge(game)}
+                    </td>
                     <td>${game.upc}</td>
-                    <td><strong>$${game.current_price ? game.current_price.toFixed(2) : 'N/A'}</strong></td>
-                    <td>$${game.avg_30 ? game.avg_30.toFixed(2) : 'N/A'}</td>
+                    <td>
+                        <strong style="font-size: 16px;">$${game.current_price ? game.current_price.toFixed(2) : 'N/A'}</strong>
+                        ${game.break_even_price ? `<div class="rank-info" style="margin-top: 5px;">Break-even: <strong>$${game.break_even_price.toFixed(2)}</strong></div>` : ''}
+                    </td>
+                    <td><strong>$${game.avg_30 ? game.avg_30.toFixed(2) : 'N/A'}</strong></td>
                     <td>$${game.low_90 ? game.low_90.toFixed(2) : 'N/A'} - $${game.high_90 ? game.high_90.toFixed(2) : 'N/A'}</td>
                     <td>
-                        <span class="velocity-badge ${velocity.badge}">${velocity.label}</span>
-                        <span class="rank-info">${velocity.description}</span>
-                        <span class="rank-info">Rank: #${game.sales_rank.toLocaleString()}</span>
+                        <span class="velocity-badge ${getVelocityBadgeClass(game.velocity_category)}">${getVelocityLabel(game.velocity_category)}</span>
+                        <div class="rank-info" style="margin-top: 8px; font-weight: bold; color: #333; line-height: 1.4;">
+                            ${game.velocity_explanation || ''}
+                        </div>
+                        <div class="rank-info" style="margin-top: 5px;">
+                            Rank: #${game.sales_rank ? game.sales_rank.toLocaleString() : 'N/A'}
+                        </div>
+                        <div class="rank-info">
+                            Est. ${game.est_sales_per_day ? game.est_sales_per_day.toFixed(1) : '0'} sales/day
+                        </div>
                     </td>
-                    <td>${game.seller_count} sellers</td>
+                    <td>
+                        <strong style="font-size: 14px;">${game.seller_count || 0} sellers</strong>
+                        ${getCompetitionBadge(game)}
+                    </td>
                     <td class="${game.profit && game.profit > 0 ? 'profit-positive' : 'profit-negative'}">
-                        ${game.profit ? (game.profit > 0 ? '+' : '') + '$' + game.profit.toFixed(2) : 'N/A'}
-                        <span class="rank-info">@ $30 buy cost</span>
+                        <div style="font-size: 16px; font-weight: bold;">
+                            ${game.profit ? (game.profit > 0 ? '+' : '') + '$' + game.profit.toFixed(2) : 'N/A'}
+                        </div>
+                        ${game.roi_percent ? `<div class="rank-info" style="margin-top: 4px; font-weight: bold; font-size: 12px;">(${game.roi_percent.toFixed(1)}% ROI)</div>` : ''}
+                        <div class="rank-info" style="margin-top: 4px;">@ $30 buy cost</div>
                     </td>
                     <td>${getOpportunityTags(game)}</td>
                 `;
                 tbody.appendChild(row);
             });
+        }
+
+        function getPriceVsAvgBadge(game) {
+            if (!game.price_vs_avg_signal || !game.price_vs_avg_text) return '';
+            
+            const colors = {
+                'excellent': '#28a745',
+                'good': '#20c997',
+                'neutral': '#6c757d',
+                'caution': '#ffc107',
+                'bad': '#dc3545'
+            };
+            
+            const icons = {
+                'excellent': '🔥',
+                'good': '💚',
+                'neutral': '➖',
+                'caution': '⚠️',
+                'bad': '🔴'
+            };
+            
+            return `<div class="info-badge" style="background: ${colors[game.price_vs_avg_signal]}; color: white;">
+                ${icons[game.price_vs_avg_signal]} ${game.price_vs_avg_text}
+            </div>`;
+        }
+
+        function getRiskBadge(game) {
+            if (!game.risk_level) return '';
+            
+            const bgColors = {
+                'green': '#d4edda',
+                'yellow': '#fff3cd',
+                'orange': '#ffe5cc',
+                'red': '#f8d7da'
+            };
+            
+            const textColors = {
+                'green': '#155724',
+                'yellow': '#856404',
+                'orange': '#cc5200',
+                'red': '#721c24'
+            };
+            
+            const riskFactorsText = game.risk_factors && game.risk_factors.length > 0 
+                ? `<div style="font-size: 10px; margin-top: 5px; line-height: 1.3;">• ${game.risk_factors.join('<br>• ')}</div>`
+                : '';
+            
+            return `<div class="info-badge" style="background: ${bgColors[game.risk_color]}; color: ${textColors[game.risk_color]}; display: block; margin-top: 8px; padding: 8px;">
+                <strong>Risk: ${game.risk_score}/10 - ${game.risk_level}</strong>
+                <div style="margin-top: 3px;">${game.risk_recommendation}</div>
+                ${riskFactorsText}
+            </div>`;
+        }
+
+        function getCompetitionBadge(game) {
+            if (!game.competition_warning) return '';
+            
+            const colors = {
+                'very_low': '#28a745',
+                'low': '#20c997',
+                'moderate': '#ffc107',
+                'high': '#fd7e14',
+                'very_high': '#dc3545'
+            };
+            
+            return `<div style="margin-top: 8px; font-size: 11px; color: ${colors[game.competition_level] || '#666'}; font-weight: bold; line-height: 1.3;">
+                ${game.competition_warning}
+            </div>`;
+        }
+
+        function getVelocityBadgeClass(category) {
+            const classes = {
+                'lightning': 'velocity-lightning',
+                'very_fast': 'velocity-fast',
+                'fast': 'velocity-fast',
+                'moderate': 'velocity-moderate',
+                'slow': 'velocity-slow',
+                'very_slow': 'velocity-slow'
+            };
+            return classes[category] || 'velocity-slow';
+        }
+
+        function getVelocityLabel(category) {
+            const labels = {
+                'lightning': '⚡ LIGHTNING',
+                'very_fast': '🔥 VERY FAST',
+                'fast': '📈 FAST',
+                'moderate': '🐢 MODERATE',
+                'slow': '❄️ SLOW',
+                'very_slow': '🐌 VERY SLOW'
+            };
+            return labels[category] || '❄️ SLOW';
         }
 
         function displayErrors(errors) {
@@ -495,40 +607,6 @@
             });
         }
 
-        function getVelocityInfo(rank, salesPerMonth) {
-            if (rank < 1000) {
-                return {
-                    badge: 'velocity-lightning',
-                    label: '⚡ LIGHTNING',
-                    description: `Sells ${Math.round(salesPerMonth/30)} times PER DAY`
-                };
-            } else if (rank < 5000) {
-                return {
-                    badge: 'velocity-fast',
-                    label: '🔥 VERY FAST',
-                    description: `Sells ${Math.round(salesPerMonth/30)} times PER DAY`
-                };
-            } else if (rank < 20000) {
-                return {
-                    badge: 'velocity-fast',
-                    label: '📈 FAST',
-                    description: `Sells ${Math.round(salesPerMonth/4)} times PER WEEK`
-                };
-            } else if (rank < 50000) {
-                return {
-                    badge: 'velocity-moderate',
-                    label: '🐢 MODERATE',
-                    description: `Sells weekly`
-                };
-            } else {
-                return {
-                    badge: 'velocity-slow',
-                    label: '❄️ SLOW',
-                    description: 'Takes weeks/months'
-                };
-            }
-        }
-
         function getOpportunityTags(game) {
             let tags = '';
             
@@ -536,7 +614,7 @@
                 tags += '<span class="tag tag-oos">🔥 Amazon OOS</span>';
             }
             
-            if (game.current_price && game.avg_30 && game.current_price < game.avg_30 * 0.9) {
+            if (game.price_vs_avg_signal === 'excellent' || game.price_vs_avg_signal === 'good') {
                 tags += '<span class="tag tag-opportunity">💰 Below Avg</span>';
             }
             
@@ -550,6 +628,14 @@
             
             if (game.profit && game.profit > 10) {
                 tags += '<span class="tag tag-opportunity">💵 High Profit</span>';
+            }
+            
+            if (game.roi_percent && game.roi_percent > 40) {
+                tags += '<span class="tag tag-opportunity">🚀 High ROI</span>';
+            }
+            
+            if (game.competition_level === 'very_low' || game.competition_level === 'low') {
+                tags += '<span class="tag tag-opportunity">✅ Low Competition</span>';
             }
             
             return tags || '—';
