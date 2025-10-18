@@ -14,7 +14,7 @@ import os
 app = Flask(__name__)
 
 # Get Keepa API key from environment variable (set in Render dashboard)
-KEEPA_API_KEY = os.environ.get('KEEPA_API_KEY', 's0l63d3uc5sl2oghiqseth9028bd52uc1t6nfge939micgheek7op4fmued1lphl')
+KEEPA_API_KEY = os.environ.get('KEEPA_API_KEY', 'YOUR_KEEPA_API_KEY_HERE')
 
 @app.route('/')
 def index():
@@ -75,9 +75,16 @@ def process_upcs():
                 
                 if 'data' in product and 'NEW' in product['data']:
                     prices = product['data']['NEW']
-                    if prices and len(prices) > 0:
-                        current_price = prices[-1] / 100 if prices[-1] > 0 else None
-                        price_history = [p/100 for p in prices if p is not None and p > 0]
+                    if prices is not None and len(prices) > 0:
+                        # Get last price (handle both single values and arrays)
+                        last_price = prices[-1] if hasattr(prices, '__getitem__') else prices
+                        current_price = last_price / 100 if last_price is not None and last_price > 0 else None
+                        # Build price history
+                        if hasattr(prices, '__iter__'):
+                            price_history = [p/100 for p in prices if p is not None and p > 0]
+                        else:
+                            if current_price:
+                                price_history = [current_price]
                 
                 # Calculate stats
                 low_90 = min(price_history) if price_history else None
@@ -112,7 +119,11 @@ def process_upcs():
                 amazon_oos = False
                 if 'data' in product and 'AMAZON' in product['data']:
                     amazon_prices = product['data']['AMAZON']
-                    amazon_oos = not amazon_prices or amazon_prices[-1] == -1
+                    if amazon_prices is not None and len(amazon_prices) > 0:
+                        last_amazon_price = amazon_prices[-1] if hasattr(amazon_prices, '__getitem__') else amazon_prices
+                        amazon_oos = last_amazon_price == -1 or last_amazon_price is None
+                    else:
+                        amazon_oos = True
                 
                 # Determine price trend
                 trend = 'stable'
