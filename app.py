@@ -69,26 +69,24 @@ def process_upcs():
                 continue
             
             try:
-                # Extract price data
+                # Extract price data - Use Keepa's pre-parsed data
                 current_price = None
                 price_history = []
                 
-                if 'data' in product and 'NEW' in product['data']:
-                    prices = product['data']['NEW']
-                    if prices is not None and len(prices) > 0:
-                        # Keepa prices are in format [time1, price1, time2, price2, ...]
-                        # Prices are at odd indices
-                        if hasattr(prices, '__len__'):
-                            price_values = [prices[i] for i in range(1, len(prices), 2)]
-                            # Filter out -1 (no data) and convert from Keepa format
-                            valid_prices = [p / 100 for p in price_values if p is not None and p > 0]
+                # Keepa Python library provides parsed data in 'data' with '_time' suffix
+                # Prices are already converted to dollars
+                if 'data' in product:
+                    # Try to get NEW price (marketplace new price)
+                    if 'NEW' in product['data'] and 'NEW_time' in product['data']:
+                        prices = product['data']['NEW']
+                        times = product['data']['NEW_time']
+                        
+                        if prices is not None and len(prices) > 0:
+                            # Filter out None and -0.01 (out of stock indicators)
+                            valid_prices = [p for p in prices if p is not None and p > 0]
                             if valid_prices:
                                 current_price = valid_prices[-1]
                                 price_history = valid_prices
-                        else:
-                            if prices > 0:
-                                current_price = prices / 100
-                                price_history = [current_price]
                 
                 # Calculate stats
                 low_90 = min(price_history) if price_history else None
