@@ -1,344 +1,405 @@
-// COMPLETE UPDATED JavaScript for index.html - Replace ALL JavaScript in your file with this:
+"""
+Flask Backend for Game Arbitrage Tracker
+Connects your HTML frontend to the Keepa API
+Optimized for Render deployment
+"""
 
-let currentResults = [];
+from flask import Flask, render_template, request, jsonify, send_file
+import keepa
+import pandas as pd
+from datetime import datetime
+import io
+import os
 
-function startFetch() {
-    const input = document.getElementById('upcInput').value.trim();
-    if (!input) {
-        alert('Please paste some UPCs first!');
-        return;
-    }
+app = Flask(__name__)
 
-    const upcs = input.split('\n').filter(u => u.trim()).map(u => u.trim());
-    
-    if (upcs.length === 0) {
-        alert('No valid UPCs found!');
-        return;
-    }
+# Get Keepa API key from environment variable (set in Render dashboard)
+KEEPA_API_KEY = os.environ.get('KEEPA_API_KEY', 'YOUR_KEEPA_API_KEY_HERE')
 
-    // Disable button and show progress
-    document.getElementById('fetchBtn').disabled = true;
-    document.getElementById('progressSection').classList.add('active');
-    document.getElementById('progressText').textContent = `Processing ${upcs.length} games...`;
-    
-    // Call API
-    fetch('/api/process', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ upcs: upcs })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.error) {
-            alert('Error: ' + data.error);
-            return;
-        }
+@app.route('/')
+def index():
+    """Serve the main HTML page"""
+    return render_template('index.html')
 
-        currentResults = data.results;
-        displayResults(data.results);
-        displayErrors(data.errors);
+@app.route('/api/process', methods=['POST'])
+def process_upcs():
+    """
+    Process UPCs and return game data from Keepa
+    """
+    try:
+        data = request.get_json()
+        upcs = data.get('upcs', [])
         
-        // Hide progress
-        document.getElementById('progressSection').classList.remove('active');
-        document.getElementById('fetchBtn').disabled = false;
-    })
-    .catch(error => {
-        alert('Error processing UPCs: ' + error);
-        document.getElementById('progressSection').classList.remove('active');
-        document.getElementById('fetchBtn').disabled = false;
-    });
-}
-
-function displayResults(results) {
-    if (results.length === 0) {
-        alert('No results found!');
-        return;
-    }
-
-    // Update stats
-    document.getElementById('totalGames').textContent = results.length;
-    const profitable = results.filter(r => r.profit && r.profit > 0).length;
-    document.getElementById('profitableCount').textContent = profitable;
-    
-    const avgProfit = results.reduce((sum, r) => sum + (r.profit || 0), 0) / results.length;
-    document.getElementById('avgProfit').textContent = '
- + avgProfit.toFixed(2);
-    
-    const hot = results.filter(r => r.sales_rank < 1000).length;
-    document.getElementById('hotItems').textContent = hot;
-
-    // Show sections
-    document.getElementById('statsSection').classList.add('active');
-    document.getElementById('resultsSection').classList.add('active');
-
-    // Populate table
-    const tbody = document.getElementById('resultsBody');
-    tbody.innerHTML = '';
-    
-    results.forEach(game => {
-        const velocity = getVelocityInfo(
-            game.sales_rank, 
-            game.est_sales_month,
-            game.velocity_category,
-            game.velocity_explanation
-        );
+        if not upcs:
+            return jsonify({'error': 'No UPCs provided'}), 400
         
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>
-                <strong>${game.title}</strong>
-                ${getPriceVsAvgBadge(game)}
-                ${getRiskBadge(game)}
-            </td>
-            <td>${game.upc}</td>
-            <td>
-                <strong>${game.current_price ? game.current_price.toFixed(2) : 'N/A'}</strong>
-                ${game.break_even_price ? `<span class="rank-info">Break-even: ${game.break_even_price.toFixed(2)}</span>` : ''}
-            </td>
-            <td>${game.avg_30 ? game.avg_30.toFixed(2) : 'N/A'}</td>
-            <td>${game.low_90 ? game.low_90.toFixed(2) : 'N/A'} - ${game.high_90 ? game.high_90.toFixed(2) : 'N/A'}</td>
-            <td>
-                <span class="velocity-badge ${velocity.badge}">${velocity.label}</span>
-                <span class="rank-info" style="display: block; margin-top: 5px; font-weight: bold; color: #333;">
-                    ${velocity.description}
-                </span>
-                <span class="rank-info" style="display: block; margin-top: 3px;">
-                    Sales Rank: #${game.sales_rank.toLocaleString()}
-                </span>
-                <span class="rank-info" style="display: block; margin-top: 2px;">
-                    Est. ${game.est_sales_per_day ? game.est_sales_per_day.toFixed(1) : Math.round(game.est_sales_month/30)} sales/day
-                </span>
-            </td>
-            <td>
-                <strong>${game.seller_count} sellers</strong>
-                ${getCompetitionBadge(game)}
-            </td>
-            <td class="${game.profit && game.profit > 0 ? 'profit-positive' : 'profit-negative'}">
-                ${game.profit ? (game.profit > 0 ? '+' : '') + '
- + game.profit.toFixed(2) : 'N/A'}
-                ${game.roi_percent ? `<span class="rank-info" style="font-weight: bold;">(${game.roi_percent.toFixed(1)}% ROI)</span>` : ''}
-                <span class="rank-info">@ $30 buy cost</span>
-            </td>
-            <td>${getOpportunityTags(game)}</td>
-        `;
-        tbody.appendChild(row);
-    });
-}
-
-function getPriceVsAvgBadge(game) {
-    if (!game.price_vs_avg_signal || !game.price_vs_avg_text) return '';
-    
-    const colors = {
-        'excellent': '#28a745',
-        'good': '#20c997',
-        'neutral': '#6c757d',
-        'caution': '#ffc107',
-        'bad': '#dc3545'
-    };
-    
-    const icons = {
-        'excellent': '🔥',
-        'good': '💚',
-        'neutral': '➖',
-        'caution': '⚠️',
-        'bad': '🔴'
-    };
-    
-    return `<div style="margin-top: 5px; padding: 4px 8px; background: ${colors[game.price_vs_avg_signal]}; color: white; border-radius: 4px; font-size: 11px; display: inline-block;">
-        ${icons[game.price_vs_avg_signal]} ${game.price_vs_avg_text}
-    </div>`;
-}
-
-function getRiskBadge(game) {
-    if (!game.risk_level) return '';
-    
-    const bgColors = {
-        'green': '#d4edda',
-        'yellow': '#fff3cd',
-        'orange': '#ffe5cc',
-        'red': '#f8d7da'
-    };
-    
-    const textColors = {
-        'green': '#155724',
-        'yellow': '#856404',
-        'orange': '#cc5200',
-        'red': '#721c24'
-    };
-    
-    const riskFactorsText = game.risk_factors && game.risk_factors.length > 0 
-        ? `<div style="font-size: 10px; margin-top: 3px;">• ${game.risk_factors.join('<br>• ')}</div>`
-        : '';
-    
-    return `<div style="margin-top: 5px; padding: 6px 8px; background: ${bgColors[game.risk_color]}; color: ${textColors[game.risk_color]}; border-radius: 4px; font-size: 11px;">
-        <strong>Risk: ${game.risk_score}/10 - ${game.risk_level}</strong>
-        <div style="margin-top: 2px;">${game.risk_recommendation}</div>
-        ${riskFactorsText}
-    </div>`;
-}
-
-function getCompetitionBadge(game) {
-    if (!game.competition_warning) return '';
-    
-    const colors = {
-        'very_low': '#28a745',
-        'low': '#20c997',
-        'moderate': '#ffc107',
-        'high': '#fd7e14',
-        'very_high': '#dc3545'
-    };
-    
-    return `<div style="margin-top: 5px; font-size: 11px; color: ${colors[game.competition_level] || '#666'}; font-weight: bold;">
-        ${game.competition_warning}
-    </div>`;
-}
-
-function displayErrors(errors) {
-    if (!errors || errors.length === 0) {
-        return;
-    }
-
-    document.getElementById('errorSection').classList.add('active');
-    document.getElementById('errorCount').textContent = errors.length;
-    
-    const errorList = document.getElementById('errorList');
-    errorList.innerHTML = '';
-    
-    errors.forEach(err => {
-        const div = document.createElement('div');
-        div.className = 'error-item';
-        div.textContent = `${err.upc}: ${err.error}`;
-        errorList.appendChild(div);
-    });
-}
-
-function getVelocityInfo(rank, salesPerMonth, velocityCategory, velocityExplanation) {
-    if (velocityExplanation) {
-        const badges = {
-            'lightning': 'velocity-lightning',
-            'very_fast': 'velocity-fast',
-            'fast': 'velocity-fast',
-            'moderate': 'velocity-moderate',
-            'slow': 'velocity-slow',
-            'very_slow': 'velocity-slow'
-        };
+        # Limit to prevent timeout (process max 100 at once on free tier)
+        if len(upcs) > 100:
+            return jsonify({
+                'error': f'Too many UPCs ({len(upcs)}). Please process in batches of 100 or less.'
+            }), 400
         
-        const labels = {
-            'lightning': '⚡ LIGHTNING',
-            'very_fast': '🔥 VERY FAST',
-            'fast': '📈 FAST',
-            'moderate': '🐢 MODERATE',
-            'slow': '❄️ SLOW',
-            'very_slow': '🐌 VERY SLOW'
-        };
+        # Initialize Keepa API
+        if KEEPA_API_KEY == 'YOUR_KEEPA_API_KEY_HERE':
+            return jsonify({'error': 'Keepa API key not configured'}), 500
         
-        return {
-            badge: badges[velocityCategory] || 'velocity-slow',
-            label: labels[velocityCategory] || '❄️ SLOW',
-            description: velocityExplanation
-        };
-    }
-    
-    if (rank < 1000) {
-        return {
-            badge: 'velocity-lightning',
-            label: '⚡ LIGHTNING',
-            description: 'LIGHTNING FAST - Sells multiple times per day. Will sell within hours.'
-        };
-    } else if (rank < 5000) {
-        return {
-            badge: 'velocity-fast',
-            label: '🔥 VERY FAST',
-            description: 'VERY FAST - Sells almost daily. Will sell within 1-3 days.'
-        };
-    } else if (rank < 20000) {
-        return {
-            badge: 'velocity-fast',
-            label: '📈 FAST',
-            description: 'FAST - Sells several times per week. Will sell within a week.'
-        };
-    } else if (rank < 50000) {
-        return {
-            badge: 'velocity-moderate',
-            label: '🐢 MODERATE',
-            description: 'MODERATE - Sells a few times per week. May take 1-2 weeks to sell.'
-        };
-    } else if (rank < 100000) {
-        return {
-            badge: 'velocity-slow',
-            label: '❄️ SLOW',
-            description: 'SLOW - Sells about once per month. May take 30+ days to sell.'
-        };
-    } else {
-        return {
-            badge: 'velocity-slow',
-            label: '🐌 VERY SLOW',
-            description: 'VERY SLOW - Rarely sells. May take months to sell. High risk.'
-        };
-    }
-}
+        api = keepa.Keepa(KEEPA_API_KEY)
+        
+        # Query Keepa API
+        products = api.query(
+            upcs,
+            product_code_is_asin=False,
+            history=True,
+            stats=90,
+            offers=20
+        )
+        
+        # Process results
+        results = []
+        errors = []
+        
+        for idx, product in enumerate(products):
+            upc = upcs[idx]
+            
+            if not product:
+                errors.append({
+                    'upc': upc,
+                    'error': 'Product not found'
+                })
+                continue
+            
+            try:
+                # Extract price data
+                current_price = None
+                price_history = []
+                
+                if 'data' in product and 'NEW' in product['data']:
+                    prices = product['data']['NEW']
+                    if prices is not None and len(prices) > 0:
+                        # Keepa prices are in format [time1, price1, time2, price2, ...]
+                        # Prices are at odd indices
+                        if hasattr(prices, '__len__'):
+                            price_values = [prices[i] for i in range(1, len(prices), 2)]
+                            # Filter out -1 (no data) and convert from Keepa format
+                            valid_prices = [p / 100 for p in price_values if p is not None and p > 0]
+                            if valid_prices:
+                                current_price = valid_prices[-1]
+                                price_history = valid_prices
+                        else:
+                            if prices > 0:
+                                current_price = prices / 100
+                                price_history = [current_price]
+                
+                # Calculate stats
+                low_90 = min(price_history) if price_history else None
+                high_90 = max(price_history) if price_history else None
+                avg_30 = sum(price_history[-30:]) / len(price_history[-30:]) if len(price_history) >= 30 else current_price
+                
+                # Get sales rank
+                sales_rank = product.get('salesRank', 999999)
+                if isinstance(sales_rank, list) and len(sales_rank) > 0:
+                    sales_rank = sales_rank[-1] if sales_rank[-1] > 0 else 999999
+                
+                # Estimate monthly sales based on rank
+                est_sales_per_day = 0
+                velocity_category = 'unknown'
+                velocity_explanation = ''
+                
+                if sales_rank < 1000:
+                    est_sales = 1500
+                    est_sales_per_day = 50
+                    velocity_category = 'lightning'
+                    velocity_explanation = 'LIGHTNING FAST - Sells multiple times per day. Will sell within hours.'
+                elif sales_rank < 5000:
+                    est_sales = 800
+                    est_sales_per_day = 27
+                    velocity_category = 'very_fast'
+                    velocity_explanation = 'VERY FAST - Sells almost daily. Will sell within 1-3 days.'
+                elif sales_rank < 20000:
+                    est_sales = 300
+                    est_sales_per_day = 10
+                    velocity_category = 'fast'
+                    velocity_explanation = 'FAST - Sells several times per week. Will sell within a week.'
+                elif sales_rank < 50000:
+                    est_sales = 100
+                    est_sales_per_day = 3
+                    velocity_category = 'moderate'
+                    velocity_explanation = 'MODERATE - Sells a few times per week. May take 1-2 weeks to sell.'
+                elif sales_rank < 100000:
+                    est_sales = 30
+                    est_sales_per_day = 1
+                    velocity_category = 'slow'
+                    velocity_explanation = 'SLOW - Sells about once per month. May take 30+ days to sell.'
+                else:
+                    est_sales = 10
+                    est_sales_per_day = 0.3
+                    velocity_category = 'very_slow'
+                    velocity_explanation = 'VERY SLOW - Rarely sells. May take months to sell. High risk.'
+                
+                # Get seller count
+                seller_count = 0
+                if 'offers' in product and product['offers']:
+                    seller_count = len(product['offers'])
+                
+                # Check if Amazon is out of stock
+                amazon_oos = False
+                if 'data' in product and 'AMAZON' in product['data']:
+                    amazon_prices = product['data']['AMAZON']
+                    if amazon_prices is not None and hasattr(amazon_prices, '__len__') and len(amazon_prices) > 0:
+                        amazon_price_values = [amazon_prices[i] for i in range(1, len(amazon_prices), 2)]
+                        last_amazon_price = amazon_price_values[-1] if amazon_price_values else -1
+                        amazon_oos = last_amazon_price == -1 or last_amazon_price is None
+                    else:
+                        amazon_oos = True
+                else:
+                    amazon_oos = True
+                
+                # Determine price trend
+                trend = 'stable'
+                if len(price_history) >= 10:
+                    recent_avg = sum(price_history[-5:]) / 5
+                    older_avg = sum(price_history[-10:-5]) / 5
+                    if recent_avg > older_avg * 1.05:
+                        trend = 'rising'
+                    elif recent_avg < older_avg * 0.95:
+                        trend = 'falling'
+                
+                # Calculate profit and ROI
+                profit = None
+                roi_percent = None
+                break_even_price = None
+                buy_cost = 30
+                
+                if current_price:
+                    amazon_fee = current_price * 0.15
+                    fba_fee = 3.99
+                    shipping = 2.00
+                    total_fees = amazon_fee + fba_fee + shipping
+                    profit = current_price - buy_cost - total_fees
+                    
+                    if buy_cost > 0:
+                        roi_percent = (profit / buy_cost) * 100
+                    
+                    break_even_price = (buy_cost + fba_fee + shipping) / 0.85
+                
+                # Price vs Average Analysis
+                price_vs_avg_percent = None
+                price_vs_avg_signal = 'neutral'
+                price_vs_avg_text = ''
+                
+                if current_price and avg_30:
+                    price_vs_avg_percent = ((current_price - avg_30) / avg_30) * 100
+                    
+                    if price_vs_avg_percent <= -10:
+                        price_vs_avg_signal = 'excellent'
+                        price_vs_avg_text = f'{abs(price_vs_avg_percent):.1f}% below average - EXCELLENT BUY'
+                    elif price_vs_avg_percent <= -5:
+                        price_vs_avg_signal = 'good'
+                        price_vs_avg_text = f'{abs(price_vs_avg_percent):.1f}% below average - GOOD BUY'
+                    elif price_vs_avg_percent <= 5:
+                        price_vs_avg_signal = 'neutral'
+                        price_vs_avg_text = 'Near average price'
+                    elif price_vs_avg_percent <= 10:
+                        price_vs_avg_signal = 'caution'
+                        price_vs_avg_text = f'{price_vs_avg_percent:.1f}% above average - WAIT'
+                    else:
+                        price_vs_avg_signal = 'bad'
+                        price_vs_avg_text = f'{price_vs_avg_percent:.1f}% above average - AVOID'
+                
+                # Competition Analysis
+                competition_level = 'unknown'
+                competition_warning = ''
+                
+                if seller_count > 0:
+                    if seller_count >= 50:
+                        competition_level = 'very_high'
+                        competition_warning = 'VERY HIGH COMPETITION - Avoid (price war likely)'
+                    elif seller_count >= 20:
+                        competition_level = 'high'
+                        competition_warning = 'HIGH COMPETITION - Risky (many sellers competing)'
+                    elif seller_count >= 10:
+                        competition_level = 'moderate'
+                        competition_warning = 'MODERATE COMPETITION - Acceptable'
+                    elif seller_count >= 5:
+                        competition_level = 'low'
+                        competition_warning = 'LOW COMPETITION - Good opportunity'
+                    else:
+                        competition_level = 'very_low'
+                        competition_warning = 'VERY LOW COMPETITION - Excellent opportunity'
+                
+                # Risk Score Calculation (0-10)
+                risk_score = 0
+                risk_factors = []
+                
+                # Factor 1: Sales Velocity
+                if sales_rank > 100000:
+                    risk_score += 3
+                    risk_factors.append('Very slow sales')
+                elif sales_rank > 50000:
+                    risk_score += 2
+                    risk_factors.append('Slow sales')
+                elif sales_rank > 20000:
+                    risk_score += 1
+                    risk_factors.append('Moderate sales')
+                
+                # Factor 2: Competition
+                if seller_count >= 50:
+                    risk_score += 3
+                    risk_factors.append('Very high competition')
+                elif seller_count >= 20:
+                    risk_score += 2
+                    risk_factors.append('High competition')
+                elif seller_count >= 10:
+                    risk_score += 1
+                    risk_factors.append('Moderate competition')
+                
+                # Factor 3: Price Stability
+                if low_90 and high_90 and low_90 > 0:
+                    price_range = high_90 - low_90
+                    volatility_percent = (price_range / low_90) * 100
+                    if volatility_percent > 50:
+                        risk_score += 2
+                        risk_factors.append('Highly volatile pricing')
+                    elif volatility_percent > 25:
+                        risk_score += 1
+                        risk_factors.append('Somewhat volatile pricing')
+                
+                # Factor 4: Profitability
+                if profit is not None:
+                    if profit < 0:
+                        risk_score += 2
+                        risk_factors.append('Negative profit margin')
+                    elif profit < 5:
+                        risk_score += 1
+                        risk_factors.append('Low profit margin')
+                
+                # Determine risk level
+                if risk_score <= 2:
+                    risk_level = 'LOW RISK'
+                    risk_color = 'green'
+                    risk_recommendation = '✅ Good opportunity'
+                elif risk_score <= 4:
+                    risk_level = 'MODERATE RISK'
+                    risk_color = 'yellow'
+                    risk_recommendation = '⚠️ Acceptable with caution'
+                elif risk_score <= 6:
+                    risk_level = 'HIGH RISK'
+                    risk_color = 'orange'
+                    risk_recommendation = '⚠️ Proceed carefully'
+                else:
+                    risk_level = 'VERY HIGH RISK'
+                    risk_color = 'red'
+                    risk_recommendation = '🔴 Avoid or minimize investment'
+                
+                result = {
+                    'upc': upc,
+                    'title': product.get('title', 'Unknown'),
+                    'asin': product.get('asin', ''),
+                    'current_price': current_price,
+                    'avg_30': avg_30,
+                    'low_90': low_90,
+                    'high_90': high_90,
+                    'sales_rank': sales_rank,
+                    'est_sales_month': est_sales,
+                    'est_sales_per_day': est_sales_per_day,
+                    'velocity_category': velocity_category,
+                    'velocity_explanation': velocity_explanation,
+                    'seller_count': seller_count,
+                    'profit': profit,
+                    'roi_percent': roi_percent,
+                    'break_even_price': break_even_price,
+                    'price_vs_avg_percent': price_vs_avg_percent,
+                    'price_vs_avg_signal': price_vs_avg_signal,
+                    'price_vs_avg_text': price_vs_avg_text,
+                    'competition_level': competition_level,
+                    'competition_warning': competition_warning,
+                    'risk_score': risk_score,
+                    'risk_level': risk_level,
+                    'risk_color': risk_color,
+                    'risk_recommendation': risk_recommendation,
+                    'risk_factors': risk_factors,
+                    'amazon_oos': amazon_oos,
+                    'trend': trend,
+                    'processed_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                }
+                
+                results.append(result)
+                
+            except Exception as e:
+                errors.append({
+                    'upc': upc,
+                    'error': str(e)
+                })
+        
+        return jsonify({
+            'results': results,
+            'errors': errors,
+            'summary': {
+                'total': len(upcs),
+                'successful': len(results),
+                'errors': len(errors)
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-function getOpportunityTags(game) {
-    let tags = '';
-    
-    if (game.amazon_oos) {
-        tags += '<span class="tag tag-oos">🔥 Amazon OOS</span>';
-    }
-    
-    if (game.price_vs_avg_signal === 'excellent' || game.price_vs_avg_signal === 'good') {
-        tags += '<span class="tag tag-opportunity">💰 Below Avg</span>';
-    }
-    
-    if (game.sales_rank < 5000 && game.seller_count < 5) {
-        tags += '<span class="tag tag-opportunity">⚡ HOT ITEM</span>';
-    }
-    
-    if (game.trend === 'rising') {
-        tags += '<span class="tag tag-trending">📈 Rising</span>';
-    }
-    
-    if (game.profit && game.profit > 10) {
-        tags += '<span class="tag tag-opportunity">💵 High Profit</span>';
-    }
-    
-    if (game.roi_percent && game.roi_percent > 40) {
-        tags += '<span class="tag tag-opportunity">🚀 High ROI</span>';
-    }
-    
-    if (game.competition_level === 'very_low' || game.competition_level === 'low') {
-        tags += '<span class="tag tag-opportunity">✅ Low Competition</span>';
-    }
-    
-    return tags || '—';
-}
+@app.route('/api/download', methods=['POST'])
+def download_excel():
+    """
+    Generate and download Excel file with results
+    """
+    try:
+        data = request.get_json()
+        results = data.get('results', [])
+        
+        if not results:
+            return jsonify({'error': 'No results to download'}), 400
+        
+        # Create DataFrame
+        df = pd.DataFrame(results)
+        
+        # Reorder columns for better readability
+        column_order = [
+            'title', 'upc', 'asin', 'current_price', 'avg_30', 
+            'low_90', 'high_90', 'sales_rank', 'est_sales_month',
+            'seller_count', 'profit', 'roi_percent', 'break_even_price',
+            'risk_score', 'risk_level', 'amazon_oos', 'trend', 'processed_date'
+        ]
+        df = df[[col for col in column_order if col in df.columns]]
+        
+        # Rename columns for Excel
+        df.columns = [
+            'Title', 'UPC', 'ASIN', 'Current Price', '30-Day Avg',
+            '90-Day Low', '90-Day High', 'Sales Rank', 'Est Sales/Month',
+            'Sellers', 'Profit (@$30 cost)', 'ROI %', 'Break-Even Price',
+            'Risk Score', 'Risk Level', 'Amazon OOS', 'Trend', 'Processed Date'
+        ]
+        
+        # Create Excel file in memory
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Game Data', index=False)
+        output.seek(0)
+        
+        # Generate filename with timestamp
+        filename = f'game_arbitrage_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+        
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-function downloadExcel() {
-    if (currentResults.length === 0) {
-        alert('No data to download!');
-        return;
-    }
+@app.route('/health')
+def health():
+    """Health check endpoint for Render"""
+    return jsonify({'status': 'healthy'}), 200
 
-    fetch('/api/download', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ results: currentResults })
-    })
-    .then(response => response.blob())
-    .then(blob => {
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `game_arbitrage_${new Date().toISOString().split('T')[0]}.xlsx`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-    })
-    .catch(error => {
-        alert('Error downloading Excel: ' + error);
-    });
-}
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
