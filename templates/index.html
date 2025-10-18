@@ -298,6 +298,22 @@
             display: inline-block;
             font-weight: bold;
         }
+
+        .product-link {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: all 0.2s;
+            margin: 2px 0;
+        }
+
+        .product-link:hover {
+            transform: translateX(3px);
+            opacity: 0.8;
+        }
     </style>
 </head>
 <body>
@@ -358,7 +374,7 @@
                         <thead>
                             <tr>
                                 <th>Title & Analysis</th>
-                                <th>UPC</th>
+                                <th>UPC / Links</th>
                                 <th>Price Info</th>
                                 <th>30-Day Avg</th>
                                 <th>90-Day Range</th>
@@ -460,10 +476,22 @@
                         ${getPriceVsAvgBadge(game)}
                         ${getRiskBadge(game)}
                     </td>
-                    <td>${game.upc}</td>
                     <td>
-                        <strong style="font-size: 16px;">$${game.current_price ? game.current_price.toFixed(2) : 'N/A'}</strong>
-                        ${game.break_even_price ? `<div class="rank-info" style="margin-top: 5px;">Break-even: <strong>$${game.break_even_price.toFixed(2)}</strong></div>` : ''}
+                        <div style="margin-bottom: 8px;"><strong>UPC:</strong> ${game.upc}</div>
+                        <div style="margin-bottom: 4px;">
+                            <a href="${game.keepa_link}" target="_blank" style="color: #667eea; text-decoration: none; font-weight: bold;">
+                                📊 View on Keepa
+                            </a>
+                        </div>
+                        <div>
+                            <a href="${game.amazon_link}" target="_blank" style="color: #FF9900; text-decoration: none; font-weight: bold;">
+                                🛒 View on Amazon
+                            </a>
+                        </div>
+                    </td>
+                    <td>
+                        <strong style="font-size: 16px;">${game.current_price ? game.current_price.toFixed(2) : 'N/A'}</strong>
+                        ${game.break_even_price ? `<div class="rank-info" style="margin-top: 5px;">Break-even: <strong>${game.break_even_price.toFixed(2)}</strong></div>` : ''}
                     </td>
                     <td><strong>$${game.avg_30 ? game.avg_30.toFixed(2) : 'N/A'}</strong></td>
                     <td>$${game.low_90 ? game.low_90.toFixed(2) : 'N/A'} - $${game.high_90 ? game.high_90.toFixed(2) : 'N/A'}</td>
