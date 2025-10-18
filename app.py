@@ -1,9 +1,7 @@
 """
-Keepa Batch Processor
-Automatically processes large lists of UPCs in batches,
-waiting for Keepa API tokens to regenerate between batches.
-
-For 2000 games with 1 token/min, this will run for ~33 hours.
+Keepa Batch Processor - Optimized for 20 Tokens/Minute Plan
+Processes games efficiently with the €49/month API plan
+For 2000 games: ~100 minutes total processing time
 """
 
 import keepa
@@ -14,33 +12,32 @@ import json
 import os
 
 # ============================================
-# CONFIGURATION
+# CONFIGURATION - OPTIMIZED FOR 20 TOKENS/MIN
 # ============================================
-KEEPA_API_KEY = 'YOUR_KEEPA_API_KEY_HERE'  # Replace with your actual key
-BATCH_SIZE = 60  # Process 60 games at a time (matches your token limit)
-WAIT_MINUTES = 60  # Wait 60 minutes between batches for tokens to regenerate
+KEEPA_API_KEY = 'YOUR_KEEPA_API_KEY_HERE'  # ⬅️ PASTE YOUR API KEY HERE
+BATCH_SIZE = 20  # Process 20 games at a time (matches your token limit)
+WAIT_MINUTES = 1  # Wait 1 minute between batches for tokens to regenerate
 OUTPUT_FILE = 'game_arbitrage_results.xlsx'
 PROGRESS_FILE = 'processing_progress.json'
 
 # ============================================
-# INPUT YOUR UPCs HERE
+# YOUR 13 UPCs FOR PROOF OF CONCEPT
 # ============================================
-# Replace this list with your 2000 UPCs
 UPCS_TO_PROCESS = [
-    '045496590482',
-    '093155141698',
-    '085392246724',
-    # ... add all 2000 UPCs here
-    # Or load from a file (see load_upcs_from_file() function below)
+    '083717203599',
+    '045496598969',
+    '045496590420',
+    '045496596583',
+    '045496598044',
+    '045496592998',
+    '045496596545',
+    '045496597092',
+    '810136672695',
+    '047875882256',
+    '710425578649',
+    '710425570322',
+    '887256110130'
 ]
-
-def load_upcs_from_file(filename='upcs.txt'):
-    """
-    Load UPCs from a text file (one UPC per line)
-    """
-    with open(filename, 'r') as f:
-        upcs = [line.strip() for line in f if line.strip()]
-    return upcs
 
 def save_progress(batch_num, total_batches, completed_upcs):
     """Save progress to resume if script is interrupted"""
@@ -207,13 +204,13 @@ def main():
     Main processing loop
     """
     print("\n" + "="*60)
-    print("KEEPA BATCH PROCESSOR")
+    print("KEEPA BATCH PROCESSOR - PROOF OF CONCEPT")
     print("="*60)
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     # Initialize API
     if KEEPA_API_KEY == 'YOUR_KEEPA_API_KEY_HERE':
-        print("\n✗ ERROR: Please set your KEEPA_API_KEY in the script!")
+        print("\n✗ ERROR: Please set your KEEPA_API_KEY in line 14!")
         return
     
     try:
@@ -224,12 +221,7 @@ def main():
         return
     
     # Load UPCs
-    # Option 1: Use UPCs from UPCS_TO_PROCESS variable
     upcs = UPCS_TO_PROCESS
-    
-    # Option 2: Load from file (uncomment to use)
-    # upcs = load_upcs_from_file('upcs.txt')
-    
     print(f"✓ Loaded {len(upcs)} UPCs to process")
     
     # Check for previous progress
@@ -259,8 +251,7 @@ def main():
     print(f"  Batch size: {BATCH_SIZE}")
     print(f"  Total batches: {total_batches}")
     print(f"  Starting from batch: {start_batch}")
-    print(f"  Wait between batches: {WAIT_MINUTES} minutes")
-    print(f"  Estimated total time: ~{(total_batches - start_batch + 1) * WAIT_MINUTES} minutes")
+    print(f"  Estimated time: ~2 minutes (all in one batch!)")
     print(f"{'='*60}\n")
     
     # Process each batch
@@ -277,7 +268,7 @@ def main():
         # Save progress
         save_progress(batch_num, total_batches, len(all_results))
         
-        # Save intermediate results to Excel
+        # Save results to Excel
         if all_results:
             df = pd.DataFrame(all_results)
             with pd.ExcelWriter(OUTPUT_FILE, engine='openpyxl') as writer:
