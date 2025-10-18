@@ -1,97 +1,71 @@
 """
-Keepa Batch Processor - Optimized for 20 Tokens/Minute Plan
-Processes games efficiently with the €49/month API plan
-For 2000 games: ~100 minutes total processing time
+Flask Backend for Game Arbitrage Tracker
+Connects your HTML frontend to the Keepa API
+Optimized for Render deployment
 """
 
+from flask import Flask, render_template, request, jsonify, send_file
 import keepa
 import pandas as pd
-import time
-from datetime import datetime, timedelta
-import json
+from datetime import datetime
+import io
 import os
 
-# ============================================
-# CONFIGURATION - OPTIMIZED FOR 20 TOKENS/MIN
-# ============================================
-KEEPA_API_KEY = 'YOUR_KEEPA_API_KEY_HERE'  # ⬅️ PASTE YOUR API KEY HERE
-BATCH_SIZE = 20  # Process 20 games at a time (matches your token limit)
-WAIT_MINUTES = 1  # Wait 1 minute between batches for tokens to regenerate
-OUTPUT_FILE = 'game_arbitrage_results.xlsx'
-PROGRESS_FILE = 'processing_progress.json'
+app = Flask(__name__)
 
-# ============================================
-# YOUR 13 UPCs FOR PROOF OF CONCEPT
-# ============================================
-UPCS_TO_PROCESS = [
-    '083717203599',
-    '045496598969',
-    '045496590420',
-    '045496596583',
-    '045496598044',
-    '045496592998',
-    '045496596545',
-    '045496597092',
-    '810136672695',
-    '047875882256',
-    '710425578649',
-    '710425570322',
-    '887256110130'
-]
+# Get Keepa API key from environment variable (set in Render dashboard)
+KEEPA_API_KEY = os.environ.get('KEEPA_API_KEY', 'YOUR_KEEPA_API_KEY_HERE')
 
-def save_progress(batch_num, total_batches, completed_upcs):
-    """Save progress to resume if script is interrupted"""
-    progress = {
-        'batch_num': batch_num,
-        'total_batches': total_batches,
-        'completed_upcs': completed_upcs,
-        'last_updated': datetime.now().isoformat()
-    }
-    with open(PROGRESS_FILE, 'w') as f:
-        json.dump(progress, f)
-    print(f"✓ Progress saved (Batch {batch_num}/{total_batches})")
+@app.route('/')
+def index():
+    """Serve the main HTML page"""
+    return render_template('index.html')
 
-def load_progress():
-    """Load progress from previous run"""
-    if os.path.exists(PROGRESS_FILE):
-        with open(PROGRESS_FILE, 'r') as f:
-            return json.load(f)
-    return None
-
-def process_batch(api, batch_upcs, batch_num, total_batches):
+@app.route('/api/process', methods=['POST'])
+def process_upcs():
     """
-    Process a single batch of UPCs
+    Process UPCs and return game data from Keepa
     """
-    print(f"\n{'='*60}")
-    print(f"Processing Batch {batch_num}/{total_batches}")
-    print(f"UPCs in this batch: {len(batch_upcs)}")
-    print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'='*60}\n")
-    
-    results = []
-    errors = []
-    
     try:
+        data = request.get_json()
+        upcs = data.get('upcs', [])
+        
+        if not upcs:
+            return jsonify({'error': 'No UPCs provided'}), 400
+        
+        # Limit to prevent timeout (process max 100 at once on free tier)
+        if len(upcs) > 100:
+            return jsonify({
+                'error': f'Too many UPCs ({len(upcs)}). Please process in batches of 100 or less.'
+            }), 400
+        
+        # Initialize Keepa API
+        if KEEPA_API_KEY == 'YOUR_KEEPA_API_KEY_HERE':
+            return jsonify({'error': 'Keepa API key not configured'}), 500
+        
+        api = keepa.Keepa(KEEPA_API_KEY)
+        
         # Query Keepa API
-        print("→ Querying Keepa API...")
         products = api.query(
-            batch_upcs,
+            upcs,
             product_code_is_asin=False,
             history=True,
             stats=90,
             offers=20
         )
         
-        # Process each product
+        # Process results
+        results = []
+        errors = []
+        
         for idx, product in enumerate(products):
-            upc = batch_upcs[idx]
+            upc = upcs[idx]
             
             if not product:
                 errors.append({
                     'upc': upc,
                     'error': 'Product not found'
                 })
-                print(f"  ✗ {upc}: Not found")
                 continue
             
             try:
@@ -102,7 +76,7 @@ def process_batch(api, batch_upcs, batch_num, total_batches):
                 if 'data' in product and 'NEW' in product['data']:
                     prices = product['data']['NEW']
                     if prices and len(prices) > 0:
-                        current_price = prices[-1] / 100
+                        current_price = prices[-1] / 100 if prices[-1] > 0 else None
                         price_history = [p/100 for p in prices if p is not None and p > 0]
                 
                 # Calculate stats
@@ -115,7 +89,7 @@ def process_batch(api, batch_upcs, batch_num, total_batches):
                 if isinstance(sales_rank, list) and len(sales_rank) > 0:
                     sales_rank = sales_rank[-1] if sales_rank[-1] > 0 else 999999
                 
-                # Estimate monthly sales
+                # Estimate monthly sales based on rank
                 if sales_rank < 1000:
                     est_sales = 1500
                 elif sales_rank < 5000:
@@ -140,7 +114,7 @@ def process_batch(api, batch_upcs, batch_num, total_batches):
                     amazon_prices = product['data']['AMAZON']
                     amazon_oos = not amazon_prices or amazon_prices[-1] == -1
                 
-                # Determine trend
+                # Determine price trend
                 trend = 'stable'
                 if len(price_history) >= 10:
                     recent_avg = sum(price_history[-5:]) / 5
@@ -150,162 +124,108 @@ def process_batch(api, batch_upcs, batch_num, total_batches):
                     elif recent_avg < older_avg * 0.95:
                         trend = 'falling'
                 
-                # Calculate profit
+                # Calculate profit (assuming $30 buy cost)
+                profit = None
                 if current_price:
                     buy_cost = 30
                     amazon_fee = current_price * 0.15
                     fba_fee = 3.99
                     shipping = 2.00
                     profit = current_price - buy_cost - amazon_fee - fba_fee - shipping
-                else:
-                    profit = None
                 
                 result = {
-                    'UPC': upc,
-                    'Title': product.get('title', 'Unknown'),
-                    'ASIN': product.get('asin', ''),
-                    'Current Price': current_price,
-                    '30-Day Avg': avg_30,
-                    '90-Day Low': low_90,
-                    '90-Day High': high_90,
-                    'Sales Rank': sales_rank,
-                    'Est Sales/Month': est_sales,
-                    'Sellers': seller_count,
-                    'Profit (@$30 cost)': profit,
-                    'Amazon OOS': amazon_oos,
-                    'Trend': trend,
-                    'Processed Date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    'upc': upc,
+                    'title': product.get('title', 'Unknown'),
+                    'asin': product.get('asin', ''),
+                    'current_price': current_price,
+                    'avg_30': avg_30,
+                    'low_90': low_90,
+                    'high_90': high_90,
+                    'sales_rank': sales_rank,
+                    'est_sales_month': est_sales,
+                    'seller_count': seller_count,
+                    'profit': profit,
+                    'amazon_oos': amazon_oos,
+                    'trend': trend,
+                    'processed_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 }
                 
                 results.append(result)
-                print(f"  ✓ {upc}: ${current_price} - {product.get('title', 'Unknown')[:40]}")
                 
             except Exception as e:
                 errors.append({
                     'upc': upc,
                     'error': str(e)
                 })
-                print(f"  ✗ {upc}: Error - {str(e)}")
         
-        print(f"\n✓ Batch complete: {len(results)} successful, {len(errors)} errors")
+        return jsonify({
+            'results': results,
+            'errors': errors,
+            'summary': {
+                'total': len(upcs),
+                'successful': len(results),
+                'errors': len(errors)
+            }
+        })
         
     except Exception as e:
-        print(f"\n✗ Batch failed: {str(e)}")
-        for upc in batch_upcs:
-            errors.append({
-                'upc': upc,
-                'error': f'Batch error: {str(e)}'
-            })
-    
-    return results, errors
+        return jsonify({'error': str(e)}), 500
 
-def main():
+@app.route('/api/download', methods=['POST'])
+def download_excel():
     """
-    Main processing loop
+    Generate and download Excel file with results
     """
-    print("\n" + "="*60)
-    print("KEEPA BATCH PROCESSOR - PROOF OF CONCEPT")
-    print("="*60)
-    print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # Initialize API
-    if KEEPA_API_KEY == 'YOUR_KEEPA_API_KEY_HERE':
-        print("\n✗ ERROR: Please set your KEEPA_API_KEY in line 14!")
-        return
-    
     try:
-        api = keepa.Keepa(KEEPA_API_KEY)
-        print("✓ Connected to Keepa API")
+        data = request.get_json()
+        results = data.get('results', [])
+        
+        if not results:
+            return jsonify({'error': 'No results to download'}), 400
+        
+        # Create DataFrame
+        df = pd.DataFrame(results)
+        
+        # Reorder columns for better readability
+        column_order = [
+            'title', 'upc', 'asin', 'current_price', 'avg_30', 
+            'low_90', 'high_90', 'sales_rank', 'est_sales_month',
+            'seller_count', 'profit', 'amazon_oos', 'trend', 'processed_date'
+        ]
+        df = df[[col for col in column_order if col in df.columns]]
+        
+        # Rename columns for Excel
+        df.columns = [
+            'Title', 'UPC', 'ASIN', 'Current Price', '30-Day Avg',
+            '90-Day Low', '90-Day High', 'Sales Rank', 'Est Sales/Month',
+            'Sellers', 'Profit (@$30 cost)', 'Amazon OOS', 'Trend', 'Processed Date'
+        ]
+        
+        # Create Excel file in memory
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Game Data', index=False)
+        output.seek(0)
+        
+        # Generate filename with timestamp
+        filename = f'game_arbitrage_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+        
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
     except Exception as e:
-        print(f"✗ Failed to connect to Keepa API: {e}")
-        return
-    
-    # Load UPCs
-    upcs = UPCS_TO_PROCESS
-    print(f"✓ Loaded {len(upcs)} UPCs to process")
-    
-    # Check for previous progress
-    progress = load_progress()
-    start_batch = 1
-    all_results = []
-    all_errors = []
-    
-    if progress:
-        print(f"\n→ Found previous progress from {progress['last_updated']}")
-        print(f"  Last completed batch: {progress['batch_num']}/{progress['total_batches']}")
-        response = input("Resume from where you left off? (y/n): ")
-        if response.lower() == 'y':
-            start_batch = progress['batch_num'] + 1
-            # Load existing results
-            if os.path.exists(OUTPUT_FILE):
-                existing_df = pd.read_excel(OUTPUT_FILE, sheet_name='Game Data')
-                all_results = existing_df.to_dict('records')
-                print(f"✓ Loaded {len(all_results)} existing results")
-    
-    # Split into batches
-    total_batches = (len(upcs) + BATCH_SIZE - 1) // BATCH_SIZE
-    
-    print(f"\n{'='*60}")
-    print(f"PROCESSING PLAN:")
-    print(f"  Total UPCs: {len(upcs)}")
-    print(f"  Batch size: {BATCH_SIZE}")
-    print(f"  Total batches: {total_batches}")
-    print(f"  Starting from batch: {start_batch}")
-    print(f"  Estimated time: ~2 minutes (all in one batch!)")
-    print(f"{'='*60}\n")
-    
-    # Process each batch
-    for batch_num in range(start_batch, total_batches + 1):
-        start_idx = (batch_num - 1) * BATCH_SIZE
-        end_idx = min(start_idx + BATCH_SIZE, len(upcs))
-        batch_upcs = upcs[start_idx:end_idx]
-        
-        # Process batch
-        results, errors = process_batch(api, batch_upcs, batch_num, total_batches)
-        all_results.extend(results)
-        all_errors.extend(errors)
-        
-        # Save progress
-        save_progress(batch_num, total_batches, len(all_results))
-        
-        # Save results to Excel
-        if all_results:
-            df = pd.DataFrame(all_results)
-            with pd.ExcelWriter(OUTPUT_FILE, engine='openpyxl') as writer:
-                df.to_excel(writer, sheet_name='Game Data', index=False)
-                if all_errors:
-                    errors_df = pd.DataFrame(all_errors)
-                    errors_df.to_excel(writer, sheet_name='Errors', index=False)
-            print(f"✓ Results saved to {OUTPUT_FILE}")
-        
-        # Wait before next batch (unless it's the last batch)
-        if batch_num < total_batches:
-            next_batch_time = datetime.now() + timedelta(minutes=WAIT_MINUTES)
-            print(f"\n⏳ Waiting {WAIT_MINUTES} minutes for tokens to regenerate...")
-            print(f"   Next batch starts at: {next_batch_time.strftime('%H:%M:%S')}")
-            print(f"   Press Ctrl+C to pause (progress is saved)")
-            
-            try:
-                time.sleep(WAIT_MINUTES * 60)
-            except KeyboardInterrupt:
-                print("\n\n⏸ Processing paused by user")
-                print(f"✓ Progress saved. Run script again to resume from Batch {batch_num + 1}")
-                return
-    
-    # Final summary
-    print("\n" + "="*60)
-    print("PROCESSING COMPLETE!")
-    print("="*60)
-    print(f"Total processed: {len(all_results)}")
-    print(f"Total errors: {len(all_errors)}")
-    print(f"Success rate: {len(all_results) / len(upcs) * 100:.1f}%")
-    print(f"Results saved to: {OUTPUT_FILE}")
-    print(f"Finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("="*60)
-    
-    # Clean up progress file
-    if os.path.exists(PROGRESS_FILE):
-        os.remove(PROGRESS_FILE)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/health')
+def health():
+    """Health check endpoint for Render"""
+    return jsonify({'status': 'healthy'}), 200
 
 if __name__ == '__main__':
-    main()
+    # Use PORT from environment (Render sets this automatically)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
