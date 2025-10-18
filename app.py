@@ -14,7 +14,7 @@ import os
 app = Flask(__name__)
 
 # Get Keepa API key from environment variable (set in Render dashboard)
-KEEPA_API_KEY = os.environ.get('KEEPA_API_KEY', 'YOUR_KEEPA_API_KEY_HERE')
+KEEPA_API_KEY = os.environ.get('KEEPA_API_KEY', 's0l63d3uc5sl2oghiqseth9028bd52uc1t6nfge939micgheek7op4fmued1lphl')
 
 @app.route('/')
 def index():
