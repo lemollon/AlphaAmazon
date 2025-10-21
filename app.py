@@ -115,37 +115,65 @@ def process_upcs():
                 est_sales_per_day = 0
                 velocity_category = 'unknown'
                 velocity_explanation = ''
+                rank_quality = ''  # New: simple 1-10 quality score
+                rank_explanation = ''  # New: what the rank actually means
                 
-                if sales_rank < 1000:
+                if sales_rank < 100:
+                    est_sales = 3000
+                    est_sales_per_day = 100
+                    velocity_category = 'lightning'
+                    velocity_explanation = 'LIGHTNING FAST - Sells 100+ times per day. Will sell within HOURS.'
+                    rank_quality = '10/10 - TOP 100 BESTSELLER'
+                    rank_explanation = 'This is in the TOP 100 products on Amazon. Elite sales velocity!'
+                elif sales_rank < 1000:
                     est_sales = 1500
                     est_sales_per_day = 50
                     velocity_category = 'lightning'
-                    velocity_explanation = 'LIGHTNING FAST - Sells multiple times per day. Will sell within hours.'
+                    velocity_explanation = 'LIGHTNING FAST - Sells 50+ times per day. Will sell within HOURS.'
+                    rank_quality = '9/10 - TOP 1000 BESTSELLER'
+                    rank_explanation = 'Excellent sales. In the top 1000 products on Amazon!'
                 elif sales_rank < 5000:
                     est_sales = 800
                     est_sales_per_day = 27
                     velocity_category = 'very_fast'
-                    velocity_explanation = 'VERY FAST - Sells almost daily. Will sell within 1-3 days.'
+                    velocity_explanation = 'VERY FAST - Sells 20-30 times per day. Will sell within 1-3 DAYS.'
+                    rank_quality = '8/10 - VERY STRONG'
+                    rank_explanation = 'Great sales. Better than 99% of Amazon products.'
                 elif sales_rank < 20000:
                     est_sales = 300
                     est_sales_per_day = 10
                     velocity_category = 'fast'
-                    velocity_explanation = 'FAST - Sells several times per week. Will sell within a week.'
+                    velocity_explanation = 'FAST - Sells 10 times per day. Will sell within a WEEK.'
+                    rank_quality = '7/10 - GOOD'
+                    rank_explanation = 'Good sales velocity. Sells consistently every day.'
                 elif sales_rank < 50000:
                     est_sales = 100
                     est_sales_per_day = 3
                     velocity_category = 'moderate'
-                    velocity_explanation = 'MODERATE - Sells a few times per week. May take 1-2 weeks to sell.'
+                    velocity_explanation = 'MODERATE - Sells 2-3 times per day. May take 1-2 WEEKS to sell.'
+                    rank_quality = '5/10 - ACCEPTABLE'
+                    rank_explanation = 'Moderate sales. Sells a few times per week.'
                 elif sales_rank < 100000:
                     est_sales = 30
                     est_sales_per_day = 1
                     velocity_category = 'slow'
-                    velocity_explanation = 'SLOW - Sells about once per month. May take 30+ days to sell.'
+                    velocity_explanation = 'SLOW - Sells about once per day. May take 30+ DAYS to sell.'
+                    rank_quality = '3/10 - SLOW'
+                    rank_explanation = 'Slow sales. Might take a month or more to sell.'
+                elif sales_rank < 500000:
+                    est_sales = 10
+                    est_sales_per_day = 0.3
+                    velocity_category = 'very_slow'
+                    velocity_explanation = 'VERY SLOW - Rarely sells. May take MONTHS to sell. HIGH RISK.'
+                    rank_quality = '2/10 - VERY SLOW'
+                    rank_explanation = 'Very slow. Sells only a few times per month.'
                 else:
                     est_sales = 10
                     est_sales_per_day = 0.3
                     velocity_category = 'very_slow'
-                    velocity_explanation = 'VERY SLOW - Rarely sells. May take months to sell. High risk.'
+                    velocity_explanation = 'VERY SLOW - Rarely sells. May take MONTHS to sell. HIGH RISK.'
+                    rank_quality = '1/10 - ALMOST NO SALES'
+                    rank_explanation = 'Rank #999,999 means NO SALES RANK DATA. Item rarely/never sells. AVOID!'
                 
                 # Get seller count
                 seller_count = 0
@@ -313,6 +341,8 @@ def process_upcs():
                     'low_90': convert_to_native_types(low_90) if low_90 is not None else None,
                     'high_90': convert_to_native_types(high_90) if high_90 is not None else None,
                     'sales_rank': convert_to_native_types(sales_rank),
+                    'rank_quality': str(rank_quality),
+                    'rank_explanation': str(rank_explanation),
                     'est_sales_month': convert_to_native_types(est_sales),
                     'est_sales_per_day': convert_to_native_types(est_sales_per_day),
                     'velocity_category': str(velocity_category),
