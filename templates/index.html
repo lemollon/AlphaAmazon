@@ -407,7 +407,10 @@
                 return;
             }
 
-            const upcs = input.split('\n').filter(u => u.trim()).map(u => u.trim());
+            const upcs = input
+                .split(/[^0-9A-Za-z]+/)
+                .map(u => u.trim())
+                .filter(u => u.length > 0);
             
             if (upcs.length === 0) {
                 alert('No valid UPCs found!');
